@@ -67,7 +67,6 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ui-config.h.in
                ${CMAKE_CURRENT_BINARY_DIR}/ui-config.h)
 
 find_package(FFmpeg REQUIRED COMPONENTS avcodec avutil avformat)
-find_package(CURL REQUIRED)
 
 add_subdirectory(frontend-plugins)
 add_executable(obs)
@@ -286,7 +285,7 @@ target_include_directories(obs PRIVATE ${CMAKE_SOURCE_DIR}/deps/json11
                                        ${CMAKE_SOURCE_DIR}/deps/libff)
 
 target_link_libraries(
-  obs PRIVATE CURL::libcurl FFmpeg::avcodec FFmpeg::avutil FFmpeg::avformat
+  obs PRIVATE FFmpeg::avcodec FFmpeg::avutil FFmpeg::avformat
               OBS::libobs OBS::frontend-api)
 
 set_target_properties(obs PROPERTIES FOLDER "frontend")

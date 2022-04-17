@@ -49,8 +49,6 @@
 
 #include <fstream>
 
-#include <curl/curl.h>
-
 #ifdef _WIN32
 #include <windows.h>
 #include <filesystem>
@@ -2906,7 +2904,6 @@ int main(int argc, char *argv[])
 
 	fstream logFile;
 
-	curl_global_init(CURL_GLOBAL_ALL);
 	int ret = run_program(logFile, argc, argv);
 
 #ifdef _WIN32

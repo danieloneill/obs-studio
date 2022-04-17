@@ -63,18 +63,18 @@ OBSAbout::OBSAbout(QWidget *parent) : QDialog(parent), ui(new Ui::OBSAbout)
 	QPointer<OBSAbout> about(this);
 
 	OBSBasic *main = OBSBasic::Get();
-	if (main->patronJson.empty() && !main->patronJsonThread) {
-		RemoteTextThread *thread = new RemoteTextThread(
+	if (main->patronJson.empty()) {
+		RemoteText *req = new RemoteText(
 			"https://obsproject.com/patreon/about-box.json",
 			"application/json");
-		QObject::connect(thread, &RemoteTextThread::Result, main,
+		QObject::connect(req, &RemoteText::Result, main,
 				 &OBSBasic::UpdatePatronJson);
 		QObject::connect(
-			thread,
+			req,
 			SIGNAL(Result(const QString &, const QString &)), this,
 			SLOT(ShowAbout()));
-		main->patronJsonThread.reset(thread);
-		thread->start();
+		connect(req, &RemoteText::Result, req, &QObject::deleteLater);
+		req->start();
 	} else {
 		ShowAbout();
 	}

@@ -233,7 +233,6 @@ private:
 	QScopedPointer<QThread> whatsNewInitThread;
 	QScopedPointer<QThread> updateCheckThread;
 	QScopedPointer<QThread> introCheckThread;
-	QScopedPointer<QThread> logUploadThread;
 
 	QPointer<OBSBasicInteraction> interaction;
 	QPointer<OBSBasicProperties> properties;
@@ -333,7 +332,6 @@ private:
 	QPointer<QVBoxLayout> programLayout;
 	QPointer<QLabel> programLabel;
 
-	QScopedPointer<QThread> patronJsonThread;
 	std::string patronJson;
 
 	void UpdateMultiviewProjectorMenu();

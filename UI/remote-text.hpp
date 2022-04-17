@@ -1,5 +1,6 @@
 /******************************************************************************
     Copyright (C) 2015 by Hugh Bailey <obs.jim@gmail.com>
+    Copyright (C) 2022 by Daniel O'Neill <daniel@oneill.app>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -17,11 +18,12 @@
 
 #pragma once
 
-#include <QThread>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
 #include <vector>
 #include <string>
 
-class RemoteTextThread : public QThread {
+class RemoteText : public QObject {
 	Q_OBJECT
 
 	std::string url;
@@ -32,35 +34,47 @@ class RemoteTextThread : public QThread {
 
 	int timeoutSec = 0;
 
-	void run() override;
+	QNetworkAccessManager qnam;
+	QNetworkReply *reply;
+	QByteArray buffer;
 
 signals:
 	void Result(const QString &text, const QString &error);
 
 public:
-	inline RemoteTextThread(std::string url_,
-				std::string contentType_ = std::string(),
-				std::string postData_ = std::string(),
-				int timeoutSec_ = 0)
+	inline RemoteText(std::string url_,
+			  std::string contentType_ = std::string(),
+			  std::string postData_ = std::string(),
+			  int timeoutSec_ = 0)
 		: url(url_),
 		  contentType(contentType_),
 		  postData(postData_),
-		  timeoutSec(timeoutSec_)
+		  timeoutSec(timeoutSec_),
+		  reply(nullptr)
 	{
 	}
 
-	inline RemoteTextThread(std::string url_,
-				std::vector<std::string> &&extraHeaders_,
-				std::string contentType_ = std::string(),
-				std::string postData_ = std::string(),
-				int timeoutSec_ = 0)
+	inline RemoteText(std::string url_,
+			  std::vector<std::string> &&extraHeaders_,
+			  std::string contentType_ = std::string(),
+			  std::string postData_ = std::string(),
+			  int timeoutSec_ = 0)
 		: url(url_),
 		  contentType(contentType_),
 		  postData(postData_),
 		  extraHeaders(std::move(extraHeaders_)),
-		  timeoutSec(timeoutSec_)
+		  timeoutSec(timeoutSec_),
+		  reply(nullptr)
 	{
 	}
+
+private slots:
+	void slotHttpReadyRead();
+	void slotHttpFinished();
+	void slotHttpError(QNetworkReply::NetworkError code);
+
+public slots:
+	void start();
 };
 
 bool GetRemoteFile(

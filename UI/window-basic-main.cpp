@@ -4692,8 +4692,6 @@ void OBSBasic::closeEvent(QCloseEvent *event)
 		whatsNewInitThread->wait();
 	if (updateCheckThread)
 		updateCheckThread->wait();
-	if (logUploadThread)
-		logUploadThread->wait();
 	if (devicePropertiesThread && devicePropertiesThread->isRunning()) {
 		devicePropertiesThread->wait();
 		devicePropertiesThread.reset();
@@ -6098,23 +6096,19 @@ void OBSBasic::UploadLog(const char *subdir, const char *file, const bool crash)
 	   << CurrentDateTimeString() << "\n\n"
 	   << fileString;
 
-	if (logUploadThread) {
-		logUploadThread->wait();
-	}
+	RemoteText *req =
+		new RemoteText("https://obsproject.com/logs/upload",
+			       "text/plain", ss.str().c_str());
 
-	RemoteTextThread *thread =
-		new RemoteTextThread("https://obsproject.com/logs/upload",
-				     "text/plain", ss.str().c_str());
-
-	logUploadThread.reset(thread);
 	if (crash) {
-		connect(thread, &RemoteTextThread::Result, this,
+		connect(req, &RemoteText::Result, this,
 			&OBSBasic::crashUploadFinished);
 	} else {
-		connect(thread, &RemoteTextThread::Result, this,
+		connect(req, &RemoteText::Result, this,
 			&OBSBasic::logUploadFinished);
 	}
-	logUploadThread->start();
+	connect(req, &RemoteText::Result, req, &QObject::deleteLater);
+	req->start();
 }
 
 void OBSBasic::on_actionShowLogs_triggered()

@@ -1,5 +1,6 @@
 /******************************************************************************
     Copyright (C) 2015 by Hugh Bailey <obs.jim@gmail.com>
+    Copyright (C) 2022 by Daniel O'Neill <daniel@oneill.app>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -15,103 +16,75 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ******************************************************************************/
 
-#include <util/curl/curl-helper.h>
 #include "obs-app.hpp"
 #include "qt-wrappers.hpp"
 #include "remote-text.hpp"
 
-using namespace std;
+#include <QEventLoop>
+#include <QUrlQuery>
 
-static auto curl_deleter = [](CURL *curl) { curl_easy_cleanup(curl); };
-using Curl = unique_ptr<CURL, decltype(curl_deleter)>;
-
-static size_t string_write(char *ptr, size_t size, size_t nmemb, string &str)
+void RemoteText::start()
 {
-	size_t total = size * nmemb;
-	if (total)
-		str.append(ptr, total);
+	buffer.clear();
 
-	return total;
-}
+	QNetworkRequest request(QUrl(QString::fromStdString(url)));
+	QString version = QString::fromStdString(App()->GetVersionString());
+	request.setHeader(QNetworkRequest::UserAgentHeader,
+			  QString("User-Agent: obs-basic %1")
+				.arg(version));
+	if (!contentType.empty())
+		request.setHeader(QNetworkRequest::ContentTypeHeader,
+				  QString::fromStdString(contentType));
 
-void RemoteTextThread::run()
-{
-	char error[CURL_ERROR_SIZE];
-	CURLcode code;
+	if (timeoutSec)
+		request.setTransferTimeout(1000*timeoutSec);
 
-	string versionString("User-Agent: obs-basic ");
-	versionString += App()->GetVersionString();
+	for (std::string &h : extraHeaders) {
+		std::string::size_type loc = h.find(": ");
+		if (loc == std::string::npos)
+			continue;
 
-	string contentTypeString;
-	if (!contentType.empty()) {
-		contentTypeString += "Content-Type: ";
-		contentTypeString += contentType;
+		QByteArray name = QByteArray::fromStdString(h.substr(0, loc));
+		QByteArray value = QByteArray::fromStdString(h.substr(loc+2));
+		request.setRawHeader(name, value);
 	}
 
-	Curl curl{curl_easy_init(), curl_deleter};
-	if (curl) {
-		struct curl_slist *header = nullptr;
-		string str;
+	if (!postData.empty()) {
+		if (contentType.empty())
+			request.setHeader(QNetworkRequest::ContentTypeHeader,
+					  "application/x-www-form-urlencoded");
 
-		header = curl_slist_append(header, versionString.c_str());
+		QByteArray postDataBA = QByteArray::fromStdString(postData);
+		reply = qnam.post(request, postDataBA);
+	} else
+		reply = qnam.get(request);
 
-		if (!contentTypeString.empty()) {
-			header = curl_slist_append(header,
-						   contentTypeString.c_str());
-		}
+	connect(reply, &QNetworkReply::finished,
+		this, &RemoteText::slotHttpFinished);
 
-		for (std::string &h : extraHeaders)
-			header = curl_slist_append(header, h.c_str());
+	connect(reply, &QNetworkReply::errorOccurred,
+		this, &RemoteText::slotHttpError);
 
-		curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
-		curl_easy_setopt(curl.get(), CURLOPT_ACCEPT_ENCODING, "");
-		curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, header);
-		curl_easy_setopt(curl.get(), CURLOPT_ERRORBUFFER, error);
-		curl_easy_setopt(curl.get(), CURLOPT_FAILONERROR, 1L);
-		curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION,
-				 string_write);
-		curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &str);
-		curl_obs_set_revoke_setting(curl.get());
-
-		if (timeoutSec)
-			curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT,
-					 timeoutSec);
-
-		if (!postData.empty()) {
-			curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDS,
-					 postData.c_str());
-		}
-
-		code = curl_easy_perform(curl.get());
-		if (code != CURLE_OK) {
-			blog(LOG_WARNING,
-			     "RemoteTextThread: HTTP request failed. %s",
-			     strlen(error) ? error : curl_easy_strerror(code));
-			emit Result(QString(), QT_UTF8(error));
-		} else {
-			emit Result(QT_UTF8(str.c_str()), QString());
-		}
-
-		curl_slist_free_all(header);
-	}
+	connect(reply, &QIODevice::readyRead,
+		this, &RemoteText::slotHttpReadyRead);
 }
 
-static size_t header_write(char *ptr, size_t size, size_t nmemb,
-			   vector<string> &list)
+void RemoteText::slotHttpReadyRead()
 {
-	string str;
+	buffer.append(reply->readAll());
+}
 
-	size_t total = size * nmemb;
-	if (total)
-		str.append(ptr, total);
+void RemoteText::slotHttpFinished()
+{
+	emit Result(QString::fromUtf8(buffer), QString());
+}
 
-	if (str.back() == '\n')
-		str.resize(str.size() - 1);
-	if (str.back() == '\r')
-		str.resize(str.size() - 1);
-
-	list.push_back(std::move(str));
-	return total;
+void RemoteText::slotHttpError(QNetworkReply::NetworkError code)
+{
+	blog(LOG_WARNING,
+	     "RemoteText: HTTP request failed. %s",
+	     reply->errorString().toStdString().c_str());
+	emit Result(QString(), reply->errorString());
 }
 
 bool GetRemoteFile(const char *url, std::string &str, std::string &error,
@@ -121,102 +94,90 @@ bool GetRemoteFile(const char *url, std::string &str, std::string &error,
 		   std::string *signature, int timeoutSec, bool fail_on_error,
 		   int postDataSize)
 {
-	vector<string> header_in_list;
-	char error_in[CURL_ERROR_SIZE];
-	CURLcode code = CURLE_FAILED_INIT;
+	QEventLoop loop;
+	QByteArray buffer;
+	QString errorString;
+	bool in_error = false;
 
-	error_in[0] = 0;
+	QNetworkAccessManager qnam;
+	QNetworkReply *reply;
+	QNetworkRequest request(QUrl(QString::fromStdString(url)));
 
-	string versionString("User-Agent: obs-basic ");
-	versionString += App()->GetVersionString();
+	QString version = QString::fromStdString(App()->GetVersionString());
+	request.setHeader(QNetworkRequest::UserAgentHeader,
+			  QString("User-Agent: obs-basic %1")
+				.arg(version));
+	if (contentType)
+		request.setHeader(QNetworkRequest::ContentTypeHeader,
+				  QString::fromUtf8(contentType));
 
-	string contentTypeString;
-	if (contentType) {
-		contentTypeString += "Content-Type: ";
-		contentTypeString += contentType;
+	if (timeoutSec)
+		request.setTransferTimeout(1000*timeoutSec);
+
+	for (std::string &h : extraHeaders) {
+		std::string::size_type loc = h.find(": ");
+		if (loc == std::string::npos)
+			continue;
+
+		QByteArray name = QByteArray::fromStdString(h.substr(0, loc));
+		QByteArray value = QByteArray::fromStdString(h.substr(loc+2));
+		request.setRawHeader(name, value);
 	}
 
-	Curl curl{curl_easy_init(), curl_deleter};
-	if (curl) {
-		struct curl_slist *header = nullptr;
 
-		header = curl_slist_append(header, versionString.c_str());
+	if (request_type == "POST") {
+		QByteArray postDataBA;
 
-		if (!contentTypeString.empty()) {
-			header = curl_slist_append(header,
-						   contentTypeString.c_str());
-		}
+		if (postData && postDataSize)
+			postDataBA = QByteArray(postData, postDataSize);
+		else if (postData)
+			postDataBA = QString(postData).toUtf8();
 
-		for (std::string &h : extraHeaders)
-			header = curl_slist_append(header, h.c_str());
+		reply = qnam.post(request, postDataBA);
+	} else
+		reply = qnam.get(request);
 
-		curl_easy_setopt(curl.get(), CURLOPT_URL, url);
-		curl_easy_setopt(curl.get(), CURLOPT_ACCEPT_ENCODING, "");
-		curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, header);
-		curl_easy_setopt(curl.get(), CURLOPT_ERRORBUFFER, error_in);
+	QObject::connect(reply, &QNetworkReply::finished, [&]() {
+		loop.quit();
+	});
+
+	QObject::connect(reply, &QIODevice::readyRead, [&]() {
+		buffer.append(reply->readAll());
+	});
+
+	QObject::connect(reply, &QNetworkReply::errorOccurred,
+			 [&](QNetworkReply::NetworkError code) {
+		in_error = true;
+
+		errorString = reply->errorString();
+		blog(LOG_WARNING,
+		     "RemoteText: HTTP request failed. %s",
+		     errorString.toStdString().c_str());
+
+		loop.quit();
+	});
+
+	loop.exec();
+
+	str = buffer.toStdString();
+	QByteArray sigHeaderLabel = QString("X-Signature").toUtf8();
+	if (signature && reply->hasRawHeader(sigHeaderLabel)) {
+		QString sigValue = reply->rawHeader(sigHeaderLabel);
+		*signature = sigValue.toStdString();
+	}
+
+	if (responseCode)
+		*responseCode = reply->attribute(
+					QNetworkRequest::HttpStatusCodeAttribute
+				).toInt();
+
+	reply->deleteLater();
+
+	if (in_error) {
+		error = errorString.toStdString();
 		if (fail_on_error)
-			curl_easy_setopt(curl.get(), CURLOPT_FAILONERROR, 1L);
-		curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION,
-				 string_write);
-		curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &str);
-		curl_obs_set_revoke_setting(curl.get());
-
-		if (signature) {
-			curl_easy_setopt(curl.get(), CURLOPT_HEADERFUNCTION,
-					 header_write);
-			curl_easy_setopt(curl.get(), CURLOPT_HEADERDATA,
-					 &header_in_list);
-		}
-
-		if (timeoutSec)
-			curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT,
-					 timeoutSec);
-
-		if (!request_type.empty()) {
-			if (request_type != "GET")
-				curl_easy_setopt(curl.get(),
-						 CURLOPT_CUSTOMREQUEST,
-						 request_type.c_str());
-
-			// Special case of "POST"
-			if (request_type == "POST") {
-				curl_easy_setopt(curl.get(), CURLOPT_POST, 1);
-				if (!postData)
-					curl_easy_setopt(curl.get(),
-							 CURLOPT_POSTFIELDS,
-							 "{}");
-			}
-		}
-		if (postData) {
-			if (postDataSize > 0) {
-				curl_easy_setopt(curl.get(),
-						 CURLOPT_POSTFIELDSIZE,
-						 (long)postDataSize);
-			}
-			curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDS,
-					 postData);
-		}
-
-		code = curl_easy_perform(curl.get());
-		if (responseCode)
-			curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE,
-					  responseCode);
-
-		if (code != CURLE_OK) {
-			error = strlen(error_in) ? error_in
-						 : curl_easy_strerror(code);
-		} else if (signature) {
-			for (string &h : header_in_list) {
-				string name = h.substr(0, 13);
-				if (name == "X-Signature: ") {
-					*signature = h.substr(13);
-					break;
-				}
-			}
-		}
-
-		curl_slist_free_all(header);
+			return false;
 	}
 
-	return code == CURLE_OK;
+	return true;
 }

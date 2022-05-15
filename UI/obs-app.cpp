@@ -2345,13 +2345,16 @@ static void load_debug_privilege(void)
 
 #define CONFIG_PATH BASE_PATH "/config"
 
-#ifndef LINUX_PORTABLE
-#define LINUX_PORTABLE 0
+#if defined(LINUX_PORTABLE) || defined(_WIN32)
+#define ALLOW_PORTABLE_MODE 1
+#else
+#define ALLOW_PORTABLE_MODE 0
 #endif
 
 int GetConfigPath(char *path, size_t size, const char *name)
 {
-	if (LINUX_PORTABLE && portable_mode) {
+#if ALLOW_PORTABLE_MODE
+	if (portable_mode) {
 		if (name && *name) {
 			return snprintf(path, size, CONFIG_PATH "/%s", name);
 		} else {
@@ -2360,11 +2363,15 @@ int GetConfigPath(char *path, size_t size, const char *name)
 	} else {
 		return os_get_config_path(path, size, name);
 	}
+#else
+	return os_get_config_path(path, size, name);
+#endif
 }
 
 char *GetConfigPathPtr(const char *name)
 {
-	if (LINUX_PORTABLE && portable_mode) {
+#if ALLOW_PORTABLE_MODE
+	if (portable_mode) {
 		char path[512];
 
 		if (snprintf(path, sizeof(path), CONFIG_PATH "/%s", name) > 0) {
@@ -2375,6 +2382,9 @@ char *GetConfigPathPtr(const char *name)
 	} else {
 		return os_get_config_path_ptr(name);
 	}
+#else
+	return os_get_config_path_ptr(name);
+#endif
 }
 
 int GetProgramDataPath(char *path, size_t size, const char *name)
@@ -2876,7 +2886,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-#if defined(LINUX_PORTABLE)
+#if ALLOW_PORTABLE_MODE
 	if (!portable_mode) {
 		portable_mode =
 			os_file_exists(BASE_PATH "/portable_mode") ||

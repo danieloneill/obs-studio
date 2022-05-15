@@ -1064,9 +1064,7 @@ static void scene_load_item(struct obs_scene *scene, obs_data_t *item_data)
 	item->blend_type = OBS_BLEND_NORMAL;
 
 	if (blend_str) {
-		if (astrcmpi(blend_str, "normal") == 0)
-			item->blend_type = OBS_BLEND_NORMAL;
-		else if (astrcmpi(blend_str, "additive") == 0)
+		if (astrcmpi(blend_str, "additive") == 0)
 			item->blend_type = OBS_BLEND_ADDITIVE;
 		else if (astrcmpi(blend_str, "subtract") == 0)
 			item->blend_type = OBS_BLEND_SUBTRACT;
@@ -1507,21 +1505,14 @@ scene_video_get_color_space(void *data, size_t count,
 {
 	UNUSED_PARAMETER(data);
 
-	enum gs_color_space canvas_space = GS_CS_SRGB;
+	enum gs_color_space space = GS_CS_SRGB;
 	struct obs_video_info ovi;
 	if (obs_get_video_info(&ovi)) {
 		switch (ovi.colorspace) {
 		case VIDEO_CS_2100_PQ:
 		case VIDEO_CS_2100_HLG:
-			canvas_space = GS_CS_709_EXTENDED;
+			space = GS_CS_709_EXTENDED;
 		}
-	}
-
-	enum gs_color_space space = canvas_space;
-	for (size_t i = 0; i < count; ++i) {
-		space = preferred_spaces[i];
-		if (space == canvas_space)
-			break;
 	}
 
 	return space;
@@ -3021,7 +3012,7 @@ obs_sceneitem_get_blending_method(obs_sceneitem_t *item)
 {
 	return obs_ptr_valid(item, "obs_sceneitem_get_blending_method")
 		       ? item->blend_method
-		       : OBS_BLEND_NORMAL;
+		       : OBS_BLEND_METHOD_DEFAULT;
 }
 
 void obs_sceneitem_set_blending_mode(obs_sceneitem_t *item,
@@ -3334,6 +3325,15 @@ obs_sceneitem_t *obs_scene_insert_group(obs_scene_t *scene, const char *name,
 	full_unlock(sub_scene);
 	full_unlock(scene);
 
+	struct calldata params;
+	uint8_t stack[128];
+
+	calldata_init_fixed(&params, stack, sizeof(stack));
+	calldata_set_ptr(&params, "scene", scene);
+	calldata_set_ptr(&params, "item", item);
+	signal_handler_signal(scene->source->context.signals, "item_add",
+			      &params);
+
 	/* ------------------------- */
 
 	return item;
@@ -3398,6 +3398,8 @@ void obs_sceneitem_group_ungroup(obs_sceneitem_t *item)
 	obs_sceneitem_t *insert_after = item;
 	obs_sceneitem_t *first;
 	obs_sceneitem_t *last;
+
+	signal_item_remove(item);
 
 	full_lock(scene);
 

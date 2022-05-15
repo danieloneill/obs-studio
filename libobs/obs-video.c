@@ -727,10 +727,13 @@ static void set_gpu_converted_data(struct obs_core_video *video,
 	case VIDEO_FORMAT_BGRX:
 	case VIDEO_FORMAT_Y800:
 	case VIDEO_FORMAT_BGR3:
+	case VIDEO_FORMAT_I412:
 	case VIDEO_FORMAT_I422:
+	case VIDEO_FORMAT_I210:
 	case VIDEO_FORMAT_I40A:
 	case VIDEO_FORMAT_I42A:
 	case VIDEO_FORMAT_YUVA:
+	case VIDEO_FORMAT_YA2L:
 	case VIDEO_FORMAT_AYUV:
 		/* unimplemented */
 		;
@@ -797,8 +800,9 @@ static inline void video_sleep(struct obs_core_video *video, bool raw_active,
 		const uint64_t udiff = os_gettime_ns() - cur_time;
 		int64_t diff;
 		memcpy(&diff, &udiff, sizeof(diff));
-		const uint64_t clamped_diff =
-			(diff > (int64_t)interval_ns) ? diff : interval_ns;
+		const uint64_t clamped_diff = (diff > (int64_t)interval_ns)
+						      ? (uint64_t)diff
+						      : interval_ns;
 		count = (int)(clamped_diff / interval_ns);
 		*p_time = cur_time + interval_ns * count;
 	}

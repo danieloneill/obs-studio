@@ -163,7 +163,8 @@ static void add_video_encoder_params(struct ffmpeg_muxer *stream,
 						: AVCOL_RANGE_MPEG;
 
 	const int max_luminance =
-		(trc == AVCOL_TRC_SMPTE2084)
+		((trc == AVCOL_TRC_SMPTE2084) ||
+		 (trc == AVCOL_TRC_ARIB_STD_B67))
 			? (int)obs_get_video_hdr_nominal_peak_level()
 			: 0;
 
@@ -701,7 +702,7 @@ static inline bool should_split(struct ffmpeg_muxer *stream,
 static bool send_new_filename(struct ffmpeg_muxer *stream, const char *filename)
 {
 	size_t ret;
-	uint32_t size = strlen(filename);
+	uint32_t size = (uint32_t)strlen(filename);
 	struct ffm_packet_info info = {.type = FFM_PACKET_CHANGE_FILE,
 				       .size = size};
 

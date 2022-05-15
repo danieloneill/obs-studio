@@ -4331,7 +4331,7 @@ void OBSBasic::ResetUI()
 				      "StudioModeLabels");
 
 	if (studioPortraitLayout)
-		ui->previewLayout->setDirection(QBoxLayout::TopToBottom);
+		ui->previewLayout->setDirection(QBoxLayout::BottomToTop);
 	else
 		ui->previewLayout->setDirection(QBoxLayout::LeftToRight);
 
@@ -4751,6 +4751,8 @@ bool OBSBasic::nativeEvent(const QByteArray &, void *message, long *)
 			display->OnDisplayChange();
 		}
 	}
+#else
+	UNUSED_PARAMETER(message);
 #endif
 
 	return false;
@@ -5885,7 +5887,7 @@ void OBSBasic::CreateSceneUndoRedoAction(const QString &action_name,
 			sources.push_back(source.Get());
 
 			/* update scene/group settings to restore their
-			* contents to their saved settings */
+			 * contents to their saved settings */
 			obs_scene_t *scene =
 				obs_group_or_scene_from_source(source);
 			if (scene) {

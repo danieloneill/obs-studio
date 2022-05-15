@@ -18,6 +18,9 @@
 #include "ffmpeg-decode.h"
 #include "obs-ffmpeg-compat.h"
 #include <obs-avc.h>
+#ifdef ENABLE_HEVC
+#include <obs-hevc.h>
+#endif
 
 #if LIBAVCODEC_VERSION_INT > AV_VERSION_INT(58, 4, 100)
 #define USE_NEW_HARDWARE_CODEC_METHOD
@@ -140,6 +143,8 @@ static inline enum video_format convert_pixel_format(int f)
 		return VIDEO_FORMAT_NV12;
 	case AV_PIX_FMT_YUYV422:
 		return VIDEO_FORMAT_YUY2;
+	case AV_PIX_FMT_YVYU422:
+		return VIDEO_FORMAT_YVYU;
 	case AV_PIX_FMT_UYVY422:
 		return VIDEO_FORMAT_UYVY;
 	case AV_PIX_FMT_YUV422P:
@@ -333,9 +338,17 @@ bool ffmpeg_decode_video(struct ffmpeg_decode *decode, uint8_t *data,
 	packet->size = (int)size;
 	packet->pts = *ts;
 
-	if (decode->codec->id == AV_CODEC_ID_H264 &&
-	    obs_avc_keyframe(data, size))
-		packet->flags |= AV_PKT_FLAG_KEY;
+	switch (decode->codec->id) {
+	case AV_CODEC_ID_H264:
+		if (obs_avc_keyframe(data, size))
+			packet->flags |= AV_PKT_FLAG_KEY;
+#ifdef ENABLE_HEVC
+		break;
+	case AV_CODEC_ID_HEVC:
+		if (obs_hevc_keyframe(data, size))
+			packet->flags |= AV_PKT_FLAG_KEY;
+#endif
+	}
 
 	ret = avcodec_send_packet(decode->decoder, packet);
 	if (ret == 0) {
@@ -399,6 +412,25 @@ bool ffmpeg_decode_video(struct ffmpeg_decode *decode, uint8_t *data,
 	frame->width = decode->frame->width;
 	frame->height = decode->frame->height;
 	frame->flip = false;
+
+	switch (decode->frame->color_trc) {
+	case AVCOL_TRC_BT709:
+	case AVCOL_TRC_GAMMA22:
+	case AVCOL_TRC_GAMMA28:
+	case AVCOL_TRC_SMPTE170M:
+	case AVCOL_TRC_SMPTE240M:
+	case AVCOL_TRC_IEC61966_2_1:
+		frame->trc = VIDEO_TRC_SRGB;
+		break;
+	case AVCOL_TRC_SMPTE2084:
+		frame->trc = VIDEO_TRC_PQ;
+		break;
+	case AVCOL_TRC_ARIB_STD_B67:
+		frame->trc = VIDEO_TRC_HLG;
+		break;
+	default:
+		frame->trc = VIDEO_TRC_DEFAULT;
+	}
 
 	if (frame->format == VIDEO_FORMAT_NONE)
 		return false;

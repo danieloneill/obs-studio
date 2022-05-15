@@ -65,7 +65,7 @@ jobs:
 
   macos_build:
     name: '02 - macOS'
-    runs-on: [macos-11]
+    runs-on: [macos-12]
     strategy:
       matrix:
         arch: ['x86_64', 'arm64']
@@ -399,7 +399,7 @@ jobs:
         with:
           bundle: obs-studio-flatpak-${{ env.OBS_GIT_HASH }}.flatpak
           manifest-path: CI/flatpak/com.obsproject.Studio.json
-          cache-key: flatpak-builder-${{ github.sha }}
+          cache-key: flatpak-builder-${{ hashFiles('CI/flatpak/com.obsproject.Studio.json') }}
 
   windows_package:
     name: '03 - Windows Installer'
@@ -454,7 +454,7 @@ jobs:
 
   macos_release:
     name: '03 - macOS notarized image'
-    runs-on: [macos-11]
+    runs-on: [macos-12]
     needs: [macos_build]
     env:
       HAVE_CODESIGN_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY != '' && secrets.MACOS_SIGNING_CERT != '' }}
